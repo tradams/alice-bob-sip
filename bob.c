@@ -4,9 +4,10 @@
 #include<stdlib.h>
 #include<zmq.h>
 #include"zhelpers.h"
-#include <unistd.h>
-#include <string.h>
+#include<unistd.h>
+#include<string.h>
 #include"cipher.h"
+#include<csv.h>
 
 
 
@@ -69,6 +70,7 @@ paillier_plaintext_t** perform_sip_b(void* socket, paillier_plaintext_t*** sigma
 }
 
 int main(){
+	int SCALE_FACTOR=1000;
 	paillier_pubkey_t* pkey;
 
 	void* ctx = zmq_ctx_new();
@@ -82,7 +84,7 @@ int main(){
 	for(i=0;i<len;i++){
 		sigma[i] = (paillier_plaintext_t**)malloc(rows*sizeof(paillier_plaintext_t**));
 		for(j=0;j<rows;j++){
-			sigma[i][j] = paillier_plaintext_from_ui(j+1);
+			sigma[i][j] = paillier_plaintext_from_ui((j+1)*100);
 		}
 
 	}
