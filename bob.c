@@ -7,9 +7,16 @@
 #include<unistd.h>
 #include<string.h>
 #include"cipher.h"
+#include<math.h>
 #include<csv.h>
 
+const int SCALE_FACTOR=1000;
 
+struct sig_data {
+	paillier_plaintext_t*** array;
+	int row,col;
+	int maxrow,maxcol;
+};
 
 // length of return known by number of columns
 paillier_plaintext_t** perform_sip_b(void* socket, paillier_plaintext_t*** sigma, int cols)
@@ -69,30 +76,86 @@ paillier_plaintext_t** perform_sip_b(void* socket, paillier_plaintext_t*** sigma
 
 }
 
+void field_parsed(void* s, size_t len, void* data)
+{
+	struct sig_data* sig = (struct sig_data*)data;
+	char* c = (char*)malloc(len+1);
+	memcpy(c,s,len);	
+	c[len] = 0;
+	printf("row: %i, col: %i\n",sig->row,sig->col);
+	sig->array[sig->col][sig->row] = paillier_plaintext_from_si((int)(atof(c)*SCALE_FACTOR));
+	free(c);
+	gmp_printf("%Zd \n",sig->array[sig->col][sig->row]->m);
+
+	sig->col = sig->col+1;
+
+}
+
+void row_parsed(int c, void* data)
+{
+	struct sig_data* sig = (struct sig_data*)data;
+	sig->row = sig->row+1;
+	sig->col = 0;
+
+}
+
 int main(){
-	int SCALE_FACTOR=1000;
+	int i,j;
 	paillier_pubkey_t* pkey;
+	struct sig_data data;
+	data.maxcol = 4;
+	data.maxrow = 4;
+	data.array = (paillier_plaintext_t***)malloc(data.maxrow*sizeof(paillier_plaintext_t**));
+	for(i=0;i<data.maxrow;i++)	
+		data.array[i] = (paillier_plaintext_t**)malloc(data.maxcol*sizeof(paillier_plaintext_t*));
+	data.row = 0;
+	data.col = 0;
+
+	FILE* fp;
+	struct csv_parser p;
+	char buf[1024];
+	size_t bytes_read;
+	if(csv_init(&p,0)) {
+		fprintf(stderr, "Failed to initialize parser\n");
+		exit(EXIT_FAILURE);
+	}
+	
+	fp = fopen("test.csv","rb");
+	if(!fp){
+		fprintf(stderr,"Failed to open sigma file %s\n",strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	while ((bytes_read=fread(buf,1,1024,fp)) > 0){
+		if(!csv_parse(&p,buf,bytes_read,field_parsed,row_parsed,&data)){
+			fprintf(stderr, "Failed to parse file: %s\n",csv_strerror(csv_error(&p)));
+		}
+	}
+	csv_fini(&p,field_parsed,row_parsed,&data);
+	csv_free(&p);
+	
+
 
 	void* ctx = zmq_ctx_new();
 
 	void *responder = zmq_socket (ctx, ZMQ_REP);
 	zmq_bind (responder, "ipc:///tmp/karma");
-	int i,j;
 	int len = 4;
-	int rows = 4;
-	paillier_plaintext_t*** sigma = (paillier_plaintext_t***)malloc(len*sizeof(paillier_plaintext_t**));
-	for(i=0;i<len;i++){
-		sigma[i] = (paillier_plaintext_t**)malloc(rows*sizeof(paillier_plaintext_t**));
-		for(j=0;j<rows;j++){
-			sigma[i][j] = paillier_plaintext_from_ui((j+1)*100);
-		}
+//	int rows = 4;
+//	paillier_plaintext_t*** sigma = (paillier_plaintext_t***)malloc(len*sizeof(paillier_plaintext_t**));
+//	for(i=0;i<len;i++){
+//		sigma[i] = (paillier_plaintext_t**)malloc(rows*sizeof(paillier_plaintext_t**));
+//		for(j=0;j<rows;j++){
+//			sigma[i][j] = paillier_plaintext_from_ui((j+1)*100);
+//		}
+//
+//	}
 
-	}
 
 	while (1) {
 		
 
-		paillier_plaintext_t** bs = perform_sip_b(responder,sigma,len);
+		paillier_plaintext_t** bs = perform_sip_b(responder,data.array,len);
 		perform_sip_b(responder,&bs,1);	
 		//now the fun free process
 
