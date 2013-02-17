@@ -99,9 +99,10 @@ void row_parsed(int c, void* data)
 
 }
 
-int main(){
-	int i,j;
-	paillier_pubkey_t* pkey;
+
+paillier_plaintext_t*** read_sigma(const char* file,int row,int col)
+{
+	int i;
 	struct sig_data data;
 	data.maxcol = 4;
 	data.maxrow = 4;
@@ -120,7 +121,7 @@ int main(){
 		exit(EXIT_FAILURE);
 	}
 	
-	fp = fopen("test.csv","rb");
+	fp = fopen(file,"rb");
 	if(!fp){
 		fprintf(stderr,"Failed to open sigma file %s\n",strerror(errno));
 		exit(EXIT_FAILURE);
@@ -133,6 +134,13 @@ int main(){
 	}
 	csv_fini(&p,field_parsed,row_parsed,&data);
 	csv_free(&p);
+	return data.array;
+
+}
+
+int main(){
+	int i,j;
+	paillier_pubkey_t* pkey;
 	
 
 
@@ -141,25 +149,15 @@ int main(){
 	void *responder = zmq_socket (ctx, ZMQ_REP);
 	zmq_bind (responder, "ipc:///tmp/karma");
 	int len = 4;
-//	int rows = 4;
-//	paillier_plaintext_t*** sigma = (paillier_plaintext_t***)malloc(len*sizeof(paillier_plaintext_t**));
-//	for(i=0;i<len;i++){
-//		sigma[i] = (paillier_plaintext_t**)malloc(rows*sizeof(paillier_plaintext_t**));
-//		for(j=0;j<rows;j++){
-//			sigma[i][j] = paillier_plaintext_from_ui((j+1)*100);
-//		}
-//
-//	}
-
+	paillier_plaintext_t*** sigma = read_sigma("test.csv",4,4);
 
 	while (1) {
-		
-
-		paillier_plaintext_t** bs = perform_sip_b(responder,data.array,len);
+		paillier_plaintext_t** bs = perform_sip_b(responder,sigma,len);
 		perform_sip_b(responder,&bs,1);	
-		//now the fun free process
-
-
+		for(i=0;i<len;i++){
+			paillier_freeplaintext(bs[i]);
+		}
+		free(bs);
 	}
 	// We never get here but if we did, this would be how we end
 	zmq_close (responder);
