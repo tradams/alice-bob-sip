@@ -155,14 +155,13 @@ int main (void)
 	data.col = 0;
 
 	// Socket to talk to server
-	printf ("Connecting to hello world server.\n");
 	gmp_printf("n: %Zd, lambda: %Zd\n",pkey->n,skey->lambda);
 	void *requester = zmq_socket (context, ZMQ_REQ);
 	zmq_connect (requester, "ipc:///tmp/karma");
 
 	data.socket = requester;
 
-	char* file = "test2.csv";
+	char* file = "features.csv";
 	FILE* fp;
 	struct csv_parser p;
 	char buf[1024];

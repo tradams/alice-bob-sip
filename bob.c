@@ -156,8 +156,8 @@ int main(){
 	int files = 2;	
 	int SIZE=4;
 	char** sigmaFiles = (char**)malloc(files*sizeof(char*));
-	sigmaFiles[0] = "test.csv";
-	sigmaFiles[1] = "test.csv";
+	sigmaFiles[0] = "sigma_a.csv";
+	sigmaFiles[1] = "sigma_b.csv";
 
 
 	void* ctx = zmq_ctx_new();
