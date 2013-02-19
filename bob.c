@@ -18,8 +18,11 @@ struct sig_data {
 	int maxrow,maxcol;
 };
 
+typedef paillier_plaintext_t*** Sigma;
+typedef paillier_plaintext_t** Vec;
+
 // length of return known by number of columns
-paillier_plaintext_t** perform_sip_b(void* socket, paillier_plaintext_t*** sigma, int cols)
+Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 {
 	// alice will send me the key first
 	char* pubkeyhex = s_recv(socket);
@@ -37,40 +40,40 @@ paillier_plaintext_t** perform_sip_b(void* socket, paillier_plaintext_t*** sigma
 	int len;
 	//read the c's
 	paillier_ciphertext_t** c = s_readcipherarray(socket,&len);
-	paillier_plaintext_t** bs = (paillier_plaintext_t**)malloc(cols*sizeof(paillier_plaintext_t*));
-	paillier_ciphertext_t** zs = (paillier_ciphertext_t**)malloc(cols*sizeof(paillier_ciphertext_t*));
+	Sigma bs = (Sigma)malloc(lsigma*sizeof(Vec));
+	paillier_ciphertext_t** zs = (paillier_ciphertext_t**)malloc(lsigma*cols*sizeof(paillier_ciphertext_t*));
 	paillier_ciphertext_t* z = paillier_create_enc_zero();
 	paillier_ciphertext_t* res = paillier_create_enc_zero();
-	paillier_ciphertext_t* t0 = paillier_create_enc_zero();
-	paillier_plaintext_t* test = paillier_plaintext_from_ui(0);
 	
-	int i,j;
-	for(i=0;i<cols;i++){
-		for(j=0;j<len;j++){
-			paillier_dec(test,pkey,skey,c[j]);
-			gmp_printf("%Zd^%Zd\n",test->m,sigma[i][j]->m);
-			paillier_exp(pkey,res,c[j],sigma[i][j]);
-			if(j==0)
-				mpz_set(z->c,res->c);
-			else{ 
-				paillier_mul(pkey,t0,z,res);
-				mpz_set(z->c,t0->c);
+	int i,j,k;
+	for(k=0;k<lsigma;k++){
+		bs[k] = (Vec)malloc(cols*sizeof(paillier_plaintext_t*));
+		for(i=0;i<cols;i++){
+			for(j=0;j<len;j++){
+				paillier_exp(pkey,res,c[j],sigma[k][i][j]);
+				if(j==0)
+					mpz_set(z->c,res->c);
+				else{ 
+					paillier_mul(pkey,z,z,res);
+				}
 			}
+			// create the b and blind this result
+			bs[k][i] = paillier_plaintext_from_si(-1);
+			paillier_enc(res,pkey,bs[k][i],&paillier_get_rand_devrandom);
+			zs[cols*k+i] = paillier_create_enc_zero();
+			paillier_mul(pkey,zs[cols*k+i],z,res);
 		}
-		// create the b and blind this result
-		bs[i] = paillier_plaintext_from_si(-1);
-		paillier_enc(res,pkey,bs[i],&paillier_get_rand_devrandom);
-		zs[i] = paillier_create_enc_zero();
-		paillier_mul(pkey,zs[i],z,res);
 	}
 	paillier_freeciphertext(res);
 	paillier_freeciphertext(z);
-	paillier_freeciphertext(t0);
 	free_cipherarray(c,len);
 
 
-	s_sendcipherarray(socket,zs,cols);
-	free_cipherarray(zs,cols);
+	s_sendcipherarray(socket,zs,lsigma*cols);
+	free_cipherarray(zs,lsigma*cols);
+	paillier_freepubkey(pkey);
+	paillier_freeprvkey(skey);
+
 	
 	return bs;
 
@@ -100,15 +103,15 @@ void row_parsed(int c, void* data)
 }
 
 
-paillier_plaintext_t*** read_sigma(const char* file,int row,int col)
+Sigma read_sigma(const char* file,int row,int col)
 {
 	int i;
 	struct sig_data data;
 	data.maxcol = 4;
 	data.maxrow = 4;
-	data.array = (paillier_plaintext_t***)malloc(data.maxrow*sizeof(paillier_plaintext_t**));
+	data.array = (Sigma)malloc(data.maxrow*sizeof(Vec));
 	for(i=0;i<data.maxrow;i++)	
-		data.array[i] = (paillier_plaintext_t**)malloc(data.maxcol*sizeof(paillier_plaintext_t*));
+		data.array[i] = (Vec)malloc(data.maxcol*sizeof(paillier_plaintext_t*));
 	data.row = 0;
 	data.col = 0;
 
@@ -137,11 +140,25 @@ paillier_plaintext_t*** read_sigma(const char* file,int row,int col)
 	return data.array;
 
 }
-
+void free_sigma(Sigma s,int rows, int cols)
+{
+	int i,j;
+	for(i=0;i<rows;i++){
+		for(j=0;j<cols;j++){
+			paillier_freeplaintext(s[i][j]);
+		}
+		free(s[i]);
+	}
+	free(s);
+}
 int main(){
 	int i,j;
 	paillier_pubkey_t* pkey;
-	
+	int files = 2;	
+	int SIZE=4;
+	char** sigmaFiles = (char**)malloc(files*sizeof(char*));
+	sigmaFiles[0] = "test.csv";
+	sigmaFiles[1] = "test.csv";
 
 
 	void* ctx = zmq_ctx_new();
@@ -149,15 +166,17 @@ int main(){
 	void *responder = zmq_socket (ctx, ZMQ_REP);
 	zmq_bind (responder, "ipc:///tmp/karma");
 	int len = 4;
-	paillier_plaintext_t*** sigma = read_sigma("test.csv",4,4);
+
+	Sigma* sigmas = (Sigma*)malloc(files*sizeof(Sigma));
+	for(i=0;i<files;i++){
+		sigmas[i] = read_sigma(sigmaFiles[i],SIZE,SIZE);
+	}
 
 	while (1) {
-		paillier_plaintext_t** bs = perform_sip_b(responder,sigma,len);
-		perform_sip_b(responder,&bs,1);	
-		for(i=0;i<len;i++){
-			paillier_freeplaintext(bs[i]);
-		}
-		free(bs);
+		Sigma bs = perform_sip_b(responder,sigmas,len,files);
+		Sigma bss = perform_sip_b(responder,&bs,files,1);	
+		free_sigma(bss,1,files);
+		free_sigma(bs,files,SIZE);
 	}
 	// We never get here but if we did, this would be how we end
 	zmq_close (responder);

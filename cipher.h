@@ -24,6 +24,7 @@ static mblock* x_getblock(zmq_msg_t* message,int size){
 	sscanf(string,"%i %i",&flag,&len);
 	block->flags = flag;
 	block->len = len;
+	free(string);
 	return block;
 
 }
