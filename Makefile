@@ -1,4 +1,4 @@
-BASE=/home/tra26/karma/local
+BASE=/usr/local
 LIB=$(BASE)/lib
 INC=$(BASE)/include
 DBG=
