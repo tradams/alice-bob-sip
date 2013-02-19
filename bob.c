@@ -35,7 +35,9 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 	free(prikeyhex);
 	gmp_printf("n: %Zd, lambda: %Zd\n",pkey->n,skey->lambda);
 	//send dummy response
+    printf("Send response");
 	s_send(socket,"roger");
+    printf("Sent response");
 
 	int len;
 	//read the c's
@@ -45,6 +47,8 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 	paillier_ciphertext_t* z = paillier_create_enc_zero();
 	paillier_ciphertext_t* res = paillier_create_enc_zero();
 	
+    int t0 = time(NULL);
+    printf("Starting actual calculation of inner product");
 	int i,j,k;
 	for(k=0;k<lsigma;k++){
 		bs[k] = (Vec)malloc(cols*sizeof(paillier_plaintext_t*));
@@ -64,6 +68,9 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 			paillier_mul(pkey,zs[cols*k+i],z,res);
 		}
 	}
+    int t1 = time(NULL);
+    printf("Calculation ended");
+    printf ("time = %d secs\n", t1 - t0);
 	paillier_freeciphertext(res);
 	paillier_freeciphertext(z);
 	free_cipherarray(c,len);
