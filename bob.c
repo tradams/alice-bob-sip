@@ -85,10 +85,8 @@ void field_parsed(void* s, size_t len, void* data)
 	char* c = (char*)malloc(len+1);
 	memcpy(c,s,len);	
 	c[len] = 0;
-	printf("row: %i, col: %i\n",sig->row,sig->col);
 	sig->array[sig->col][sig->row] = paillier_plaintext_from_si((int)(atof(c)*SCALE_FACTOR));
 	free(c);
-	gmp_printf("%Zd \n",sig->array[sig->col][sig->row]->m);
 
 	sig->col = sig->col+1;
 
@@ -105,6 +103,7 @@ void row_parsed(int c, void* data)
 
 Sigma read_sigma(const char* file,int row,int col)
 {
+	printf("reading file %s for sigma\n",file);
 	int i;
 	struct sig_data data;
 	data.maxcol = 4;
@@ -173,8 +172,11 @@ int main(){
 	}
 
 	while (1) {
+		printf("Waiting for other end to initiate SIP\n");
 		Sigma bs = perform_sip_b(responder,sigmas,len,files);
+		printf("Sent response back, waiting again\n");
 		Sigma bss = perform_sip_b(responder,&bs,files,1);	
+		printf("Final answer sent\n");
 		free_sigma(bss,1,files);
 		free_sigma(bs,files,SIZE);
 	}

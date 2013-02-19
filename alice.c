@@ -5,8 +5,21 @@
 #include <unistd.h>
 #include"zhelpers.h"
 #include"cipher.h"
+#include<csv.h>
+#include<math.h>
 
 const int SIZE=4;
+const int SCALE_FACTOR=1;
+
+struct classify_data {
+	int col;
+	int maxcol;
+	int set;
+	void* socket;
+	paillier_pubkey_t* pub;
+	paillier_prvkey_t* prv;
+	paillier_plaintext_t** texts;
+};
 
 paillier_ciphertext_t** perform_sip(void* socket, paillier_pubkey_t* pubkey, paillier_prvkey_t* prikey, paillier_plaintext_t** plaintexts, int len, int* nlen)
 {
@@ -33,23 +46,28 @@ paillier_ciphertext_t** perform_sip(void* socket, paillier_pubkey_t* pubkey, pai
 	return z;
 }
 
-paillier_plaintext_t* perform_xSigmax(void* socket, paillier_pubkey_t* pkey, paillier_prvkey_t* skey, paillier_plaintext_t** texts, int len)
+paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
 {
+	printf("Going to start x'Sigmax calculation\n");
+	void* socket = data->socket;
+	paillier_pubkey_t* pkey = data->pub;
+	paillier_prvkey_t* skey = data->prv;
+	paillier_plaintext_t** texts = data->texts;
+	int len = data->maxcol;
 	int i,j;
 	int nlen;
 
 	paillier_ciphertext_t** z = perform_sip(socket,pkey,skey,texts,len,&nlen);
 	paillier_plaintext_t** ai = (paillier_plaintext_t**)malloc(nlen*sizeof(paillier_plaintext_t*));
 	
-	printf("%i items returned\n",nlen);
 	//TODO: find out why I can't use free_cipherarray here?
 	for(j=0;j<nlen;j++){
 		ai[j] = paillier_dec(NULL,pkey,skey,z[j]);
 		gmp_printf("Recieved %Zd as inner product, unblinded\n",ai[j]->m);
 		paillier_freeciphertext(z[j]);
 	}
-	//free(z);
-
+	free(z);
+	printf("Recieved the result of x'Sigma for all sigmas\n");
 
 	z = perform_sip(socket,pkey,skey,texts,len,&nlen);
 	paillier_plaintext_t** qi = (paillier_plaintext_t**)malloc(nlen*sizeof(paillier_plaintext_t*));
@@ -59,6 +77,8 @@ paillier_plaintext_t* perform_xSigmax(void* socket, paillier_pubkey_t* pkey, pai
 		gmp_printf("Recieved %Zd as inner product, unblinded\n",qi[j]->m);
 	}
 	free_cipherarray(z,nlen);
+
+	printf("Recieved the result of bx\n");
 	
 	mpz_t* aix = (mpz_t*)malloc(len*sizeof(mpz_t));
 	mpz_t tmp;
@@ -73,6 +93,8 @@ paillier_plaintext_t* perform_xSigmax(void* socket, paillier_pubkey_t* pkey, pai
 			mpz_add(aix[j],aix[j],tmp);
 		}
 	}
+
+	printf("Computed new answers");
 	
 	for(i=0;i<nlen;i++){
 		gmp_printf("ANSWER: %Zd\n",aix[i]);
@@ -88,6 +110,32 @@ paillier_plaintext_t* perform_xSigmax(void* socket, paillier_pubkey_t* pkey, pai
 
 
 }
+void field_parsed(void* s, size_t len, void* pdata)
+{
+	struct classify_data* data = (struct classify_data*)pdata;
+	char* c = (char*)malloc(len+1);
+	memcpy(c,s,len);	
+	c[len] = 0;
+	if(data->col == 0) // this is the special column
+		data->set = atoi(c);
+	else
+		data->texts[data->col-1] = paillier_plaintext_from_si((int)(atof(c)*SCALE_FACTOR));
+	free(c);
+
+	data->col = data->col+1;
+}
+
+void row_parsed(int c, void* pdata)
+{
+	struct classify_data* data = (struct classify_data*)pdata;
+	data->col = 0;
+	//classify this data
+	perform_xSigmax(data);
+	int i;
+	for(i=0;i<data->maxcol;i++){
+		paillier_freeplaintext(data->texts[i]);
+	}
+}
 
 int main (void)
 {
@@ -98,22 +146,50 @@ int main (void)
 
 	void *context = zmq_ctx_new ();
 
+
+	struct classify_data data;
+	data.pub = pkey;
+	data.prv = skey;
+	data.maxcol = SIZE;
+	data.texts = (paillier_plaintext_t**)malloc(SIZE*sizeof(paillier_plaintext_t*));
+	data.col = 0;
+
 	// Socket to talk to server
 	printf ("Connecting to hello world server.\n");
 	gmp_printf("n: %Zd, lambda: %Zd\n",pkey->n,skey->lambda);
 	void *requester = zmq_socket (context, ZMQ_REQ);
 	zmq_connect (requester, "ipc:///tmp/karma");
-	paillier_plaintext_t** c = (paillier_plaintext_t**)malloc(SIZE*sizeof(paillier_plaintext_t*));
-	int i,j;
-	for(i=0;i<SIZE;i++){
-		c[i] = paillier_plaintext_from_ui(i+1);
+
+	data.socket = requester;
+
+	char* file = "test2.csv";
+	FILE* fp;
+	struct csv_parser p;
+	char buf[1024];
+	size_t bytes_read;
+	if(csv_init(&p,0)) {
+		fprintf(stderr, "Failed to initialize parser\n");
+		exit(EXIT_FAILURE);
+	}
+	
+	fp = fopen(file,"rb");
+	if(!fp){
+		fprintf(stderr,"Failed to open classify file %s\n",strerror(errno));
+		exit(EXIT_FAILURE);
 	}
 
-	int request_nbr;
-	for (request_nbr = 0; request_nbr != 10; request_nbr++) {
-		perform_xSigmax(requester,pkey,skey,c,SIZE);
-
+	while ((bytes_read=fread(buf,1,1024,fp)) > 0){
+		if(!csv_parse(&p,buf,bytes_read,field_parsed,row_parsed,&data)){
+			fprintf(stderr, "Failed to parse file: %s\n",csv_strerror(csv_error(&p)));
+		}
 	}
+	csv_fini(&p,field_parsed,row_parsed,&data);
+	//fini took care of freeing the plaintexts
+	csv_free(&p);
+	free(data.texts);
+
+	
+
 	sleep (2);
 	zmq_close (requester);
 	zmq_ctx_destroy (context);
