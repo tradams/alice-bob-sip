@@ -73,7 +73,7 @@ paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
     paillier_plaintext_t** qi = (paillier_plaintext_t**)malloc(nlen*sizeof(paillier_plaintext_t*));
     for(j=0;j<nlen;j++){
         qi[j] = paillier_dec(NULL,pkey,skey,z[j]);
-        mpz_sub(qi[j]->m,qi[j]->m,pkey->n);
+        //mpz_sub(qi[j]->m,qi[j]->m,pkey->n);
         gmp_printf("Recieved %Zd as inner product, unblinded\n",qi[j]->m);
     }
     free_cipherarray(z,nlen);
@@ -84,7 +84,7 @@ paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
     mpz_t tmp;
     for(i=0;i<nlen;i++){
         mpz_init(aix[i]);
-        mpz_sub(aix[i],aix[i],qi[i]->m);
+        mpz_add(aix[i],aix[i],qi[i]->m);
     }
     mpz_init(tmp);
     for(i=0;i<data->maxcol;i++){

@@ -9,13 +9,14 @@
 #include"cipher.h"
 #include<math.h>
 #include<csv.h>
+#include<getopt.h>
 
-const int SCALE_FACTOR=1000;
 
 struct sig_data {
 	paillier_plaintext_t*** array;
 	int row,col;
 	int maxrow,maxcol;
+    int scale_factor;
 };
 
 typedef paillier_plaintext_t*** Sigma;
@@ -35,9 +36,7 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 	free(prikeyhex);
 	gmp_printf("n: %Zd, lambda: %Zd\n",pkey->n,skey->lambda);
 	//send dummy response
-    printf("Send response");
 	s_send(socket,"roger");
-    printf("Sent response");
 
 	int len;
 	//read the c's
@@ -62,8 +61,10 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 				}
 			}
 			// create the b and blind this result
-			bs[k][i] = paillier_plaintext_from_si(-1);
+            int val = -1;
+			bs[k][i] = paillier_plaintext_from_si(val);
 			paillier_enc(res,pkey,bs[k][i],&paillier_get_rand_devurandom);
+            mpz_set_si(bs[k][i]->m,-val);
 			zs[cols*k+i] = paillier_create_enc_zero();
 			paillier_mul(pkey,zs[cols*k+i],z,res);
 		}
@@ -92,7 +93,7 @@ void field_parsed(void* s, size_t len, void* data)
 	char* c = (char*)malloc(len+1);
 	memcpy(c,s,len);	
 	c[len] = 0;
-	sig->array[sig->col][sig->row] = paillier_plaintext_from_si((int)(atof(c)*SCALE_FACTOR));
+	sig->array[sig->col][sig->row] = paillier_plaintext_from_si((int)(atof(c)*sig->scale_factor));
 	free(c);
 
 	sig->col = sig->col+1;
@@ -108,13 +109,15 @@ void row_parsed(int c, void* data)
 }
 
 
-Sigma read_sigma(const char* file,int row,int col)
+
+Sigma read_sigma(const char* file,int row,int col, int scale_factor)
 {
 	printf("reading file %s for sigma\n",file);
 	int i;
 	struct sig_data data;
 	data.maxcol = 4;
 	data.maxrow = 4;
+    data.scale_factor = scale_factor;
 	data.array = (Sigma)malloc(data.maxrow*sizeof(Vec));
 	for(i=0;i<data.maxrow;i++)	
 		data.array[i] = (Vec)malloc(data.maxcol*sizeof(paillier_plaintext_t*));
@@ -157,35 +160,89 @@ void free_sigma(Sigma s,int rows, int cols)
 	}
 	free(s);
 }
-int main(){
+
+struct opts {
+    int size;
+    int scale;
+    char* pkeyhex;
+    int pkeyset;
+};
+
+void parse_options(int argc, char** argv, struct opts* opts)
+{
+    int c;
+     
+    opts->pkeyset = 0;
+    while (1)
+    {
+        static struct option long_options[] =
+        {
+            {"dim",    required_argument, 0, 'd'},
+            {"scale",  required_argument, 0, 's'},
+            {"pkey",  required_argument, 0, 'p'},
+            {0, 0, 0, 0}
+        };
+        int option_index = 0;
+
+        c = getopt_long (argc, argv, "d:s:p:",
+                       long_options, &option_index);
+
+        if (c == -1)
+            break;
+
+        switch (c)
+        {
+            case 'd':
+              opts->size = atoi(optarg);
+              break;
+            case 's':
+              opts->scale = atoi(optarg);
+              break;
+            case 'p':
+              opts->pkeyhex = optarg;
+              opts->pkeyset = 1;
+              break;
+
+            case '?':
+              /* getopt_long already printed an error message. */
+              break;
+        }
+    }
+}
+
+int main(int argc, char** argv){
 	int i,j;
 	paillier_pubkey_t* pkey;
 	int files = 2;	
-	int SIZE=4;
 	char** sigmaFiles = (char**)malloc(files*sizeof(char*));
 	sigmaFiles[0] = "sigma_a.csv";
 	sigmaFiles[1] = "sigma_b.csv";
-
 
 	void* ctx = zmq_ctx_new();
 
 	void *responder = zmq_socket (ctx, ZMQ_REP);
 	zmq_bind (responder, "ipc:///tmp/karma");
-	int len = 4;
+    struct opts options;
+    parse_options(argc,argv, &options);
+
+    if(options.size <= 0 || options.scale <= 0){
+        fprintf(stderr,"Size and scale must be greater than 0\n");
+        exit(EXIT_FAILURE);
+    }
 
 	Sigma* sigmas = (Sigma*)malloc(files*sizeof(Sigma));
 	for(i=0;i<files;i++){
-		sigmas[i] = read_sigma(sigmaFiles[i],SIZE,SIZE);
+		sigmas[i] = read_sigma(sigmaFiles[i],options.size,options.size,options.scale);
 	}
 
 	//while (1) {
 		printf("Waiting for other end to initiate SIP\n");
-		Sigma bs = perform_sip_b(responder,sigmas,len,files);
+		Sigma bs = perform_sip_b(responder,sigmas,options.size,files);
 		printf("Sent response back, waiting again\n");
 		Sigma bss = perform_sip_b(responder,&bs,files,1);	
 		printf("Final answer sent\n");
 		free_sigma(bss,1,files);
-		free_sigma(bs,files,SIZE);
+		free_sigma(bs,files,options.size);
 //	}
 	// We never get here but if we did, this would be how we end
 	zmq_close (responder);
