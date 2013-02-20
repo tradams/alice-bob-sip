@@ -28,7 +28,7 @@ paillier_ciphertext_t** perform_sip(void* socket, paillier_pubkey_t* pubkey, pai
 	paillier_ciphertext_t** c = (paillier_ciphertext_t**)malloc(len*sizeof(paillier_ciphertext_t*));
 	int i;
 	for(i=0;i<len;i++){
-		c[i] = paillier_enc(NULL,pubkey,plaintexts[i],&paillier_get_rand_devrandom);
+		c[i] = paillier_enc(NULL,pubkey,plaintexts[i],&paillier_get_rand_devurandom);
 	}
 	s_send(socket,pubkeyhex);
 	free(pubkeyhex);
@@ -94,7 +94,7 @@ paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
 		}
 	}
 
-	printf("Computed new answers");
+	printf("Computed new answers\n");
 	
 	for(i=0;i<nlen;i++){
 		gmp_printf("ANSWER: %Zd\n",aix[i]);
@@ -141,7 +141,7 @@ int main (void)
 {
 	paillier_pubkey_t* pkey;
 	paillier_prvkey_t* skey;
-	paillier_keygen(256,&pkey,&skey,&paillier_get_rand_devrandom);
+	paillier_keygen(128,&pkey,&skey,&paillier_get_rand_devrandom);
 
 
 	void *context = zmq_ctx_new ();

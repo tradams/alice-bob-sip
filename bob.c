@@ -48,7 +48,7 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 	paillier_ciphertext_t* res = paillier_create_enc_zero();
 	
     int t0 = time(NULL);
-    printf("Starting actual calculation of inner product");
+    printf("Starting actual calculation of inner product\n");
 	int i,j,k;
 	for(k=0;k<lsigma;k++){
 		bs[k] = (Vec)malloc(cols*sizeof(paillier_plaintext_t*));
@@ -63,13 +63,13 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 			}
 			// create the b and blind this result
 			bs[k][i] = paillier_plaintext_from_si(-1);
-			paillier_enc(res,pkey,bs[k][i],&paillier_get_rand_devrandom);
+			paillier_enc(res,pkey,bs[k][i],&paillier_get_rand_devurandom);
 			zs[cols*k+i] = paillier_create_enc_zero();
 			paillier_mul(pkey,zs[cols*k+i],z,res);
 		}
 	}
     int t1 = time(NULL);
-    printf("Calculation ended");
+    printf("Calculation ended\n");
     printf ("time = %d secs\n", t1 - t0);
 	paillier_freeciphertext(res);
 	paillier_freeciphertext(z);
@@ -178,7 +178,7 @@ int main(){
 		sigmas[i] = read_sigma(sigmaFiles[i],SIZE,SIZE);
 	}
 
-	while (1) {
+	//while (1) {
 		printf("Waiting for other end to initiate SIP\n");
 		Sigma bs = perform_sip_b(responder,sigmas,len,files);
 		printf("Sent response back, waiting again\n");
@@ -186,7 +186,7 @@ int main(){
 		printf("Final answer sent\n");
 		free_sigma(bss,1,files);
 		free_sigma(bs,files,SIZE);
-	}
+//	}
 	// We never get here but if we did, this would be how we end
 	zmq_close (responder);
 	zmq_ctx_destroy (ctx);
