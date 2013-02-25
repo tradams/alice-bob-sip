@@ -115,8 +115,8 @@ Sigma read_sigma(const char* file,int row,int col, int scale_factor)
 	printf("reading file %s for sigma\n",file);
 	int i;
 	struct sig_data data;
-	data.maxcol = 4;
-	data.maxrow = 4;
+	data.maxcol = col;
+	data.maxrow = row;
     data.scale_factor = scale_factor;
 	data.array = (Sigma)malloc(data.maxrow*sizeof(Vec));
 	for(i=0;i<data.maxrow;i++)	
@@ -213,10 +213,17 @@ void parse_options(int argc, char** argv, struct opts* opts)
 int main(int argc, char** argv){
 	int i,j;
 	paillier_pubkey_t* pkey;
-	int files = 2;	
+	int files = 9;	
 	char** sigmaFiles = (char**)malloc(files*sizeof(char*));
-	sigmaFiles[0] = "sigma_a.csv";
-	sigmaFiles[1] = "sigma_b.csv";
+	sigmaFiles[0] = "sigmas/Alternative.csv";
+	sigmaFiles[1] = "sigmas/Blues.csv";
+	sigmaFiles[2] = "sigmas/Electorinic.csv";
+	sigmaFiles[3] = "sigmas/Folk.csv";
+	sigmaFiles[4] = "sigmas/Funk.csv";
+	sigmaFiles[5] = "sigmas/Jazz.csv";
+	sigmaFiles[6] = "sigmas/Pop.csv";
+	sigmaFiles[7] = "sigmas/Rap.csv";
+	sigmaFiles[8] = "sigmas/Rock.csv";
 
 	void* ctx = zmq_ctx_new();
 
@@ -235,7 +242,7 @@ int main(int argc, char** argv){
 		sigmas[i] = read_sigma(sigmaFiles[i],options.size,options.size,options.scale);
 	}
 
-	//while (1) {
+	while (1) {
 		printf("Waiting for other end to initiate SIP\n");
 		Sigma bs = perform_sip_b(responder,sigmas,options.size,files);
 		printf("Sent response back, waiting again\n");
@@ -243,7 +250,7 @@ int main(int argc, char** argv){
 		printf("Final answer sent\n");
 		free_sigma(bss,1,files);
 		free_sigma(bs,files,options.size);
-//	}
+	}
 	// We never get here but if we did, this would be how we end
 	zmq_close (responder);
 	zmq_ctx_destroy (ctx);

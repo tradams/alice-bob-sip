@@ -16,6 +16,8 @@ struct classify_data {
     int set;
     int scale_factor;
     void* socket;
+    int correct;
+    int total;
     paillier_pubkey_t* pub;
     paillier_prvkey_t* prv;
     paillier_plaintext_t** texts;
@@ -46,12 +48,15 @@ paillier_ciphertext_t** perform_sip(void* socket, paillier_pubkey_t* pubkey, pai
     return z;
 }
 
-paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
+int perform_xSigmax(struct classify_data* data)
 {
     printf("Going to start x'Sigmax calculation\n");
     void* socket = data->socket;
     paillier_pubkey_t* pkey = data->pub;
     paillier_prvkey_t* skey = data->prv;
+    mpz_t mid;
+    mpz_init_set(mid,pkey->n);
+    mpz_tdiv_q_ui(mid,mid,2);
     paillier_plaintext_t** texts = data->texts;
     int len = data->maxcol;
     int i,j;
@@ -63,7 +68,10 @@ paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
     //TODO: find out why I can't use free_cipherarray here?
     for(j=0;j<nlen;j++){
         ai[j] = paillier_dec(NULL,pkey,skey,z[j]);
-        gmp_printf("Recieved %Zd as inner product, unblinded\n",ai[j]->m);
+        if(mpz_cmp(ai[j]->m,mid)>0){
+            mpz_sub(ai[j]->m,ai[j]->m,pkey->n);
+        }
+   //     gmp_printf("Recieved %Zd as inner product, unblinded\n",ai[j]->m);
         paillier_freeciphertext(z[j]);
     }
     free(z);
@@ -73,8 +81,10 @@ paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
     paillier_plaintext_t** qi = (paillier_plaintext_t**)malloc(nlen*sizeof(paillier_plaintext_t*));
     for(j=0;j<nlen;j++){
         qi[j] = paillier_dec(NULL,pkey,skey,z[j]);
-        //mpz_sub(qi[j]->m,qi[j]->m,pkey->n);
-        gmp_printf("Recieved %Zd as inner product, unblinded\n",qi[j]->m);
+        if(mpz_cmp(qi[j]->m,mid)>0){
+            mpz_sub(qi[j]->m,qi[j]->m,pkey->n);
+        }
+  //      gmp_printf("Recieved %Zd as inner product, unblinded\n",qi[j]->m);
     }
     free_cipherarray(z,nlen);
 
@@ -95,17 +105,28 @@ paillier_plaintext_t* perform_xSigmax(struct classify_data* data)
     }
 
     printf("Computed new answers\n");
-    
+    int index=0;
+    mpz_t maxval;
+    mpz_init(maxval);
+    mpz_set(maxval,aix[0]);
     for(i=0;i<nlen;i++){
-        gmp_printf("ANSWER: %Zd\n",aix[i]);
+//        mpz_tdiv_q_ui(aix[i],aix[i],1000*1000*1000);
+//        gmp_printf("ANSWER: %Zd\n",aix[i]);
+        if(mpz_cmp(aix[i],maxval) > 0){
+            index = i;
+            mpz_set(maxval,aix[i]);
+        }
         mpz_clear(aix[i]);
         paillier_freeplaintext(ai[i]);
         paillier_freeplaintext(qi[i]);
     }
+    gmp_printf("Max index was: %i with value %Zd\n",index,maxval);
+    mpz_clear(maxval);
     free(aix);
     mpz_clear(tmp);
     //TODO: ask keith why this doesn't work
     //free(ai);
+    return index;
     
 
 
@@ -130,7 +151,11 @@ void row_parsed(int c, void* pdata)
     struct classify_data* data = (struct classify_data*)pdata;
     data->col = 0;
     //classify this data
-    perform_xSigmax(data);
+    data->total++;
+    int index = perform_xSigmax(data);
+    if(index == data->set){
+        data->correct++;
+    }
     int i;
     for(i=0;i<data->maxcol;i++){
         paillier_freeplaintext(data->texts[i]);
@@ -228,6 +253,8 @@ int main (int argc, char** argv)
     data.scale_factor = options.scale;
     data.texts = (paillier_plaintext_t**)malloc(options.size*sizeof(paillier_plaintext_t*));
     data.col = 0;
+    data.correct = 0;
+    data.total = 0;
 
     // Socket to talk to server
     gmp_printf("n: %Zd, lambda: %Zd\n",pkey->n,skey->lambda);
@@ -260,8 +287,10 @@ int main (int argc, char** argv)
     csv_fini(&p,field_parsed,row_parsed,&data);
     //fini took care of freeing the plaintexts
     csv_free(&p);
+
     free(data.texts);
 
+    printf("Correct(%i)/Total(%i) = %f\n",data.correct,data.total,data.correct/(data.total+0.0));
     
 
     sleep (2);
