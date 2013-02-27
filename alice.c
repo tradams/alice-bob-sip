@@ -21,25 +21,16 @@ struct classify_data {
     paillier_pubkey_t* pub;
     paillier_prvkey_t* prv;
     paillier_plaintext_t** texts;
+    gmp_randstate_t rand;
 };
 
-paillier_ciphertext_t** perform_sip(void* socket, paillier_pubkey_t* pubkey, paillier_prvkey_t* prikey, paillier_plaintext_t** plaintexts, int len, int* nlen)
+paillier_ciphertext_t** perform_sip(void* socket, paillier_pubkey_t* pubkey, paillier_plaintext_t** plaintexts, int len, int* nlen, gmp_randstate_t rand)
 {
-    char* prikeyhex = paillier_prvkey_to_hex(prikey);
-    char* pubkeyhex = paillier_pubkey_to_hex(pubkey);
     paillier_ciphertext_t** c = (paillier_ciphertext_t**)malloc(len*sizeof(paillier_ciphertext_t*));
     int i;
     for(i=0;i<len;i++){
-        c[i] = paillier_enc(NULL,pubkey,plaintexts[i],&paillier_get_rand_devurandom);
+        c[i] = paillier_enc_r(NULL,pubkey,plaintexts[i],rand);
     }
-    s_send(socket,pubkeyhex);
-    free(pubkeyhex);
-    char* ign = s_recv(socket); // ignore response
-    free(ign);
-    s_send(socket,prikeyhex);
-    free(prikeyhex);
-    ign = s_recv(socket); // ignore response
-    free(ign);
     s_sendcipherarray(socket,c,len);
     free_cipherarray(c,len);
     // read a cipher array as the result
@@ -50,7 +41,7 @@ paillier_ciphertext_t** perform_sip(void* socket, paillier_pubkey_t* pubkey, pai
 
 int perform_xSigmax(struct classify_data* data)
 {
-    printf("Going to start x'Sigmax calculation\n");
+    //printf("Going to start x'Sigmax calculation\n");
     void* socket = data->socket;
     paillier_pubkey_t* pkey = data->pub;
     paillier_prvkey_t* skey = data->prv;
@@ -62,7 +53,7 @@ int perform_xSigmax(struct classify_data* data)
     int i,j;
     int nlen;
 
-    paillier_ciphertext_t** z = perform_sip(socket,pkey,skey,texts,len,&nlen);
+    paillier_ciphertext_t** z = perform_sip(socket,pkey,texts,len,&nlen,data->rand);
     paillier_plaintext_t** ai = (paillier_plaintext_t**)malloc(nlen*sizeof(paillier_plaintext_t*));
     
     //TODO: find out why I can't use free_cipherarray here?
@@ -71,24 +62,22 @@ int perform_xSigmax(struct classify_data* data)
         if(mpz_cmp(ai[j]->m,mid)>0){
             mpz_sub(ai[j]->m,ai[j]->m,pkey->n);
         }
-   //     gmp_printf("Recieved %Zd as inner product, unblinded\n",ai[j]->m);
         paillier_freeciphertext(z[j]);
     }
     free(z);
-    printf("Recieved the result of x'Sigma for all sigmas\n");
+    //printf("Recieved the result of x'Sigma for all sigmas\n");
 
-    z = perform_sip(socket,pkey,skey,texts,len,&nlen);
+    z = perform_sip(socket,pkey,texts,len,&nlen,data->rand);
     paillier_plaintext_t** qi = (paillier_plaintext_t**)malloc(nlen*sizeof(paillier_plaintext_t*));
     for(j=0;j<nlen;j++){
         qi[j] = paillier_dec(NULL,pkey,skey,z[j]);
         if(mpz_cmp(qi[j]->m,mid)>0){
             mpz_sub(qi[j]->m,qi[j]->m,pkey->n);
         }
-  //      gmp_printf("Recieved %Zd as inner product, unblinded\n",qi[j]->m);
     }
     free_cipherarray(z,nlen);
 
-    printf("Recieved the result of bx\n");
+    //printf("Recieved the result of bx\n");
     
     mpz_t* aix = (mpz_t*)malloc(len*sizeof(mpz_t));
     mpz_t tmp;
@@ -104,7 +93,7 @@ int perform_xSigmax(struct classify_data* data)
         }
     }
 
-    printf("Computed new answers\n");
+    //printf("Computed new answers\n");
     int index=0;
     mpz_t maxval;
     mpz_init(maxval);
@@ -120,7 +109,7 @@ int perform_xSigmax(struct classify_data* data)
         paillier_freeplaintext(ai[i]);
         paillier_freeplaintext(qi[i]);
     }
-    gmp_printf("Max index was: %i with value %Zd\n",index,maxval);
+   // gmp_printf("Max index was: %i with value %Zd\n",index,maxval);
     mpz_clear(maxval);
     free(aix);
     mpz_clear(tmp);
@@ -153,6 +142,7 @@ void row_parsed(int c, void* pdata)
     //classify this data
     data->total++;
     int index = perform_xSigmax(data);
+    printf("Processed %i \n",data->total);
     if(index == data->set){
         data->correct++;
     }
@@ -255,11 +245,18 @@ int main (int argc, char** argv)
     data.col = 0;
     data.correct = 0;
     data.total = 0;
+    init_rand(data.rand,&paillier_get_rand_devurandom,pkey->bits / 8 + 1);
+    
 
     // Socket to talk to server
     gmp_printf("n: %Zd, lambda: %Zd\n",pkey->n,skey->lambda);
     void *requester = zmq_socket (context, ZMQ_REQ);
     zmq_connect (requester, "ipc:///tmp/karma");
+    char* pubkeyhex = paillier_pubkey_to_hex(pkey);
+    s_send(requester,pubkeyhex);
+    char* recv = s_recv(requester);
+    free(recv);
+    free(pubkeyhex);
 
     data.socket = requester;
 
@@ -289,6 +286,7 @@ int main (int argc, char** argv)
     csv_free(&p);
 
     free(data.texts);
+    gmp_randclear(data.rand);
 
     printf("Correct(%i)/Total(%i) = %f\n",data.correct,data.total,data.correct/(data.total+0.0));
     

@@ -152,6 +152,45 @@ paillier_enc( paillier_ciphertext_t* res,
 
 	return res;
 }
+paillier_ciphertext_t*
+paillier_enc_r( paillier_ciphertext_t* res,
+							paillier_pubkey_t* pub,
+							paillier_plaintext_t* pt,
+					    	 gmp_randstate_t rand )
+{
+	mpz_t r;
+	//gmp_randstate_t rand;
+	mpz_t x;
+
+	/* pick random blinding factor */
+
+	mpz_init(r);
+ 	//init_rand(rand, get_rand, pub->bits / 8 + 1);
+	do
+		mpz_urandomb(r, rand, pub->bits);
+	while( mpz_cmp(r, pub->n) >= 0 );
+
+	/* compute ciphertext */
+	
+	if( !res )
+	{
+		res = (paillier_ciphertext_t*) malloc(sizeof(paillier_ciphertext_t));
+		mpz_init(res->c);
+	}
+
+	mpz_init(x);
+	mpz_powm(res->c, pub->n_plusone, pt->m, pub->n_squared);
+	mpz_powm(x, r, pub->n, pub->n_squared);
+
+	mpz_mul(res->c, res->c, x);
+	mpz_mod(res->c, res->c, pub->n_squared);
+
+	mpz_clear(x);
+	mpz_clear(r);
+  //`gmp_randclear(rand);
+
+	return res;
+}
 
 paillier_plaintext_t*
 paillier_dec( paillier_plaintext_t* res,

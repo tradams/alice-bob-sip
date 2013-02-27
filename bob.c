@@ -23,21 +23,8 @@ typedef paillier_plaintext_t*** Sigma;
 typedef paillier_plaintext_t** Vec;
 
 // length of return known by number of columns
-Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
+Sigma perform_sip_b(void* socket, paillier_pubkey_t* pkey,  Sigma* sigma, int cols,int lsigma, gmp_randstate_t rand)
 {
-	// alice will send me the key first
-	char* pubkeyhex = s_recv(socket);
-	paillier_pubkey_t* pkey = paillier_pubkey_from_hex(pubkeyhex);
-	free(pubkeyhex);
-	//send dummy response
-	s_send(socket,"roger");
-	char* prikeyhex = s_recv(socket);
-	paillier_prvkey_t* skey = paillier_prvkey_from_hex(prikeyhex,pkey);
-	free(prikeyhex);
-	gmp_printf("n: %Zd, lambda: %Zd\n",pkey->n,skey->lambda);
-	//send dummy response
-	s_send(socket,"roger");
-
 	int len;
 	//read the c's
 	paillier_ciphertext_t** c = s_readcipherarray(socket,&len);
@@ -47,7 +34,7 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 	paillier_ciphertext_t* res = paillier_create_enc_zero();
 	
     int t0 = time(NULL);
-    printf("Starting actual calculation of inner product\n");
+    //printf("Starting actual calculation of inner product\n");
 	int i,j,k;
 	for(k=0;k<lsigma;k++){
 		bs[k] = (Vec)malloc(cols*sizeof(paillier_plaintext_t*));
@@ -63,14 +50,14 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 			// create the b and blind this result
             int val = -1;
 			bs[k][i] = paillier_plaintext_from_si(val);
-			paillier_enc(res,pkey,bs[k][i],&paillier_get_rand_devurandom);
+			paillier_enc_r(res,pkey,bs[k][i],rand);
             mpz_set_si(bs[k][i]->m,-val);
 			zs[cols*k+i] = paillier_create_enc_zero();
 			paillier_mul(pkey,zs[cols*k+i],z,res);
 		}
 	}
     int t1 = time(NULL);
-    printf("Calculation ended\n");
+    //printf("Calculation ended\n");
     printf ("time = %d secs\n", t1 - t0);
 	paillier_freeciphertext(res);
 	paillier_freeciphertext(z);
@@ -79,8 +66,6 @@ Sigma perform_sip_b(void* socket, Sigma* sigma, int cols,int lsigma)
 
 	s_sendcipherarray(socket,zs,lsigma*cols);
 	free_cipherarray(zs,lsigma*cols);
-	paillier_freepubkey(pkey);
-	paillier_freeprvkey(skey);
 
 	
 	return bs;
@@ -212,7 +197,6 @@ void parse_options(int argc, char** argv, struct opts* opts)
 
 int main(int argc, char** argv){
 	int i,j;
-	paillier_pubkey_t* pkey;
 	int files = 9;	
 	char** sigmaFiles = (char**)malloc(files*sizeof(char*));
 	sigmaFiles[0] = "sigmas/Alternative.csv";
@@ -242,12 +226,21 @@ int main(int argc, char** argv){
 		sigmas[i] = read_sigma(sigmaFiles[i],options.size,options.size,options.scale);
 	}
 
+	char* pubkeyhex = s_recv(responder);
+    printf("%s pubkeyhex\n",pubkeyhex);
+	paillier_pubkey_t* pkey = paillier_pubkey_from_hex(pubkeyhex);
+    gmp_printf("n = %Zd\n",pkey->n);
+	free(pubkeyhex);
+    s_send(responder,"Roger");
+
+    gmp_randstate_t rand;
+    init_rand(rand,&paillier_get_rand_devurandom,pkey->bits / 8 + 1);
 	while (1) {
-		printf("Waiting for other end to initiate SIP\n");
-		Sigma bs = perform_sip_b(responder,sigmas,options.size,files);
-		printf("Sent response back, waiting again\n");
-		Sigma bss = perform_sip_b(responder,&bs,files,1);	
-		printf("Final answer sent\n");
+		//printf("Waiting for other end to initiate SIP\n");
+		Sigma bs = perform_sip_b(responder,pkey,sigmas,options.size,files,rand);
+		//printf("Sent response back, waiting again\n");
+		Sigma bss = perform_sip_b(responder,pkey,&bs,files,1,rand);	
+	//	printf("Final answer sent\n");
 		free_sigma(bss,1,files);
 		free_sigma(bs,files,options.size);
 	}
